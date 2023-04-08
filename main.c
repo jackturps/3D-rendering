@@ -6,21 +6,35 @@
 #include <sys/time.h>
 
 
-// The total elapsed time since the start of the application.
-double start_time;
-double elapsed_time;
+// Time since the last frame in seconds.
+double time_delta;
+double last_frame_time;
 
 typedef struct {
-    float data[3][3];
-} matrix;
+    float x;
+    float y;
+    float z;
+} vec3_t;
 
-float triangle_radius = 0.5;
+// TODO: This feels like something we might need but gonna avoid for now.
+typedef struct {
+    vec3_t position;
 
+    GLfloat* vertices;
+    int num_vertices;
+} object_t;
+
+/**
+ * The first 3 values of each vector define the x, y, and z coordinate.
+ * The 4th value is the homogenous coordinate, or w coordinate, and is included
+ * so that we can do more types of matrix transforms(translation, etc). Its useful
+ * to have a constant value that we can multiply by.
+ */
 GLfloat vertices[] = {
-        0.0f, 0.5f, 0.0f,     // Apex.
-        0.43f, -0.5f, 0.24f,    // Front Right.
-        -0.43f, -0.5f, 0.24f,   // Front Left.
-        0.0f, -0.5f, -0.5f,   // Back.
+        0.0f, 0.55f, 0.0f, 1.0f,     // Apex.
+        0.43f, -0.4f, 0.24f, 1.0f,    // Front Right.
+        -0.43f, -0.4f, 0.24f, 1.0f,   // Front Left.
+        0.0f, -0.4f, -0.5f, 1.0f,   // Back.
 };
 
 GLuint indices[] = {
@@ -39,72 +53,130 @@ GLfloat colors[] = {
         0.0f, 1.0f, 0.0f,
 };
 
+object_t triangle = {
+    .position = {
+        .x = 0,
+        .y = 0,
+        .z = 0,
+    },
+    .vertices = vertices,
+    .num_vertices = 4,
+};
+
 double get_current_time() {
     struct timespec tp;
     clock_gettime(CLOCK_MONOTONIC, &tp);
-    return (double) tp.tv_sec * 1000.0 + (double) tp.tv_nsec / 1000000.0;
+    return (double)tp.tv_sec * 1000.0 + (double)tp.tv_nsec / 1000000.0;
 }
 
-void update_elapsed_time() {
+void update_time_delta() {
     double current_time = get_current_time();
-    elapsed_time = current_time - start_time;
+    time_delta = (current_time - last_frame_time) / 1000;
+    last_frame_time = current_time;
 }
 
-double normal_sin(double input) {
-    return sin(input) + 1.0 / 2.0;
-}
-
-void apply_matrix_transform(GLfloat* vertex_pointer, int num_vertices, float matrix[3][3]) {
+void apply_matrix_transform(GLfloat* vertex_pointer, int num_vertices, float matrix[4][4]) {
     for(int vertex_idx = 0; vertex_idx < num_vertices; vertex_idx++) {
-        int idx = vertex_idx * 3;
+        int idx = vertex_idx * 4;
 
-        float result[3] = { 0, 0, 0 };
+        float result[4] = { 0, 0, 0, 0 };
 
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
                 result[i] += matrix[i][j] * vertex_pointer[idx + j];
             }
         }
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             vertex_pointer[idx + i] = result[i];
         }
     }
 }
 
-void get_y_rotation_matrix(float output[3][3], float theta) {
-    output[0][0] = cos(theta);  output[0][1] = 0; output[0][2] = sin(theta);
-    output[1][0] = 0;           output[1][1] = 1; output[1][2] = 0;
-    output[2][0] = -sin(theta); output[2][1] = 0; output[2][2] = cos(theta);
+void get_y_rotation_matrix(float output[4][4], float theta) {
+    output[0][0] = cos(theta);  output[0][1] = 0; output[0][2] = sin(theta); output[0][3] = 0;
+    output[1][0] = 0;           output[1][1] = 1; output[1][2] = 0;          output[1][3] = 0;
+    output[2][0] = -sin(theta); output[2][1] = 0; output[2][2] = cos(theta); output[2][3] = 0;
+    // NOTE: We need to set w to 1 here to ensure we don't zero it for future operations.
+    output[3][0] = 0;           output[3][1] = 0; output[3][2] = 0;          output[3][3] = 1;
 }
 
-void get_x_rotation_matrix(float output[3][3], float theta) {
-    output[0][0] = 1; output[0][1] = 0;          output[0][2] = 0;
-    output[1][0] = 0; output[1][1] = cos(theta); output[1][2] = -sin(theta);
-    output[2][0] = 0; output[2][1] = sin(theta); output[2][2] = cos(theta);
+void get_x_rotation_matrix(float output[4][4], float theta) {
+    output[0][0] = 1; output[0][1] = 0;          output[0][2] = 0;           output[0][3] = 0;
+    output[1][0] = 0; output[1][1] = cos(theta); output[1][2] = -sin(theta); output[1][3] = 0;
+    output[2][0] = 0; output[2][1] = sin(theta); output[2][2] = cos(theta);  output[2][3] = 0;
+    output[3][0] = 0; output[3][1] = 0;          output[3][2] = 0;           output[3][3] = 1;
+}
+
+void get_translate_matrix(float output[4][4], float x_distance, float y_distance, float z_distance) {
+    output[0][0] = 1; output[0][1] = 0; output[0][2] = 0; output[0][3] = x_distance;
+    output[1][0] = 0; output[1][1] = 1; output[1][2] = 0; output[1][3] = y_distance;
+    output[2][0] = 0; output[2][1] = 0; output[2][2] = 1; output[2][3] = z_distance;
+    output[3][0] = 0; output[3][1] = 0; output[3][2] = 0; output[3][3] = 1;
+}
+
+vec3_t add_vectors(vec3_t vec1, vec3_t vec2) {
+    vec3_t new_vec = {
+        .x = vec1.x + vec2.x,
+        .y = vec1.y + vec2.y,
+        .z = vec1.z + vec2.z,
+    };
+    return new_vec;
+}
+
+void translate_object(object_t* shape, vec3_t distance) {
+    float translation_matrix[4][4];
+    get_translate_matrix(translation_matrix, distance.x, distance.y, distance.z);
+    apply_matrix_transform(shape->vertices, shape->num_vertices, translation_matrix);
+
+    shape->position = add_vectors(shape->position, distance);
+}
+
+void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
+    /**
+     * All rotations happen around the origin so we need to translate back to the origin before rotating,
+     * and translate back to our position after rotating.
+     * TODO: Support multiple rotations at the origin without multiple translations in between. Oh actually might not
+     * be necessary if rotation matrices can be combined.
+     */
+    vec3_t position = shape->position;
+
+    float translation_matrix[4][4];
+    get_translate_matrix(translation_matrix, -position.x, -position.y, -position.z);
+    apply_matrix_transform(shape->vertices, shape->num_vertices, translation_matrix);
+
+    apply_matrix_transform(shape->vertices, shape->num_vertices, rotation_matrix);
+
+    get_translate_matrix(translation_matrix, position.x, position.y, position.z);
+    apply_matrix_transform(vertices, shape->num_vertices, translation_matrix);
 }
 
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    update_elapsed_time();
+    update_time_delta();
 
-    int num_vertices = 9;
+    // TODO: Its probably better to apply all transforms to each vertex as we iterate instead of iterating multiple times.
+    float transform_matrix[4][4];
 
-    // TODO: Its probably better to apply all transforms to each vertex as we iterate instead
-    // of iterating multiple times.
-    float transform_matrix[3][3];
+    vec3_t move_distance = {
+        .x = 0, //0.05f * time_delta,
+        .y = 0, //0.05f * time_delta,
+        .z = 0,
+    };
+    translate_object(&triangle, move_distance);
 
-    get_y_rotation_matrix(transform_matrix, 0.03f);
-    apply_matrix_transform(vertices, num_vertices, transform_matrix);
+    get_x_rotation_matrix(transform_matrix, 3.13f * time_delta);
+    rotate_object(&triangle, transform_matrix);
 
-    get_x_rotation_matrix(transform_matrix, 0.013f);
-    apply_matrix_transform(vertices, num_vertices, transform_matrix);
+    get_y_rotation_matrix(transform_matrix, 4.7f * time_delta);
+    rotate_object(&triangle, transform_matrix);
+
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
 
     // THe first argument here specifies the size of each vertex/colour, not the number of items in the array.
-    glVertexPointer(3, GL_FLOAT, 0, vertices);
+    glVertexPointer(4, GL_FLOAT, 0, vertices);
     glColorPointer(3, GL_FLOAT, 0, colors);
     // The total number of items is specified HERE.
     glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, indices);
@@ -120,7 +192,7 @@ void display() {
 }
 
 int main(int argc, char** argv) {
-    start_time = get_current_time();
+    last_frame_time = get_current_time();
 
     glutInit(&argc, argv);
     glutCreateWindow("Jacks 3-Dimensional Wonderland");
