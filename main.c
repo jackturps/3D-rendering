@@ -71,22 +71,16 @@ void apply_matrix_transform(GLfloat* vertex_pointer, int num_vertices, float mat
     }
 }
 
-void rotate_vertices_around_y_axis(GLfloat* vertex_pointer, int num_vertices, float theta) {
-    float rotation_matrix[3][3] = {
-        { cos(theta),  0, sin(theta) },
-        { 0,           1, 0          },
-        { -sin(theta), 0, cos(theta) },
-    };
-    apply_matrix_transform(vertex_pointer, num_vertices, rotation_matrix);
+void get_y_rotation_matrix(float output[3][3], float theta) {
+    output[0][0] = cos(theta);  output[0][1] = 0; output[0][2] = sin(theta);
+    output[1][0] = 0;           output[1][1] = 1; output[1][2] = 0;
+    output[2][0] = -sin(theta); output[2][1] = 0; output[2][2] = cos(theta);
 }
 
-void rotate_vertices_around_x_axis(GLfloat* vertex_pointer, int num_vertices, float theta) {
-    float rotation_matrix[3][3] = {
-            { 1,           0, 0          },
-            { 0, cos(theta), -sin(theta) },
-            { 0, sin(theta), cos(theta)  },
-    };
-    apply_matrix_transform(vertex_pointer, num_vertices, rotation_matrix);
+void get_x_rotation_matrix(float output[3][3], float theta) {
+    output[0][0] = 1; output[0][1] = 0;          output[0][2] = 0;
+    output[1][0] = 0; output[1][1] = cos(theta); output[1][2] = -sin(theta);
+    output[2][0] = 0; output[2][1] = sin(theta); output[2][2] = cos(theta);
 }
 
 void display() {
@@ -95,8 +89,16 @@ void display() {
     update_elapsed_time();
 
     int num_vertices = 9;
-    rotate_vertices_around_y_axis(vertices, num_vertices, 0.03f);
-    rotate_vertices_around_x_axis(vertices, num_vertices, 0.0023f);
+
+    // TODO: Its probably better to apply all transforms to each vertex as we iterate instead
+    // of iterating multiple times.
+    float transform_matrix[3][3];
+
+    get_y_rotation_matrix(transform_matrix, 0.03f);
+    apply_matrix_transform(vertices, num_vertices, transform_matrix);
+
+    get_x_rotation_matrix(transform_matrix, 0.013f);
+    apply_matrix_transform(vertices, num_vertices, transform_matrix);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
@@ -113,7 +115,6 @@ void display() {
 //    glShadeModel(GL_FLAT);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    // glTranslatef( 0.0003f * elapsed_time, 0.0003f * elapsed_time, 0.0f); // Move the camera 1 unit to the left
 
     glutSwapBuffers();
 }
