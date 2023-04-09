@@ -7,7 +7,6 @@
 #include <memory.h>
 #include <stdlib.h>
 
-
 // Time since the last frame in seconds.
 double time_delta;
 double last_frame_time;
@@ -112,6 +111,75 @@ object_t create_pyramid(float base_width, float height) {
     return triangle;
 }
 
+object_t create_cube(float side_width) {
+    object_t cube = {
+            .position     = { .x = 0, .y = 0, .z = 0 },
+            .num_vertices = 8,
+            .num_indices  = 12,
+    };
+    GLuint v_start = vertex_allocator.free_offset;
+
+    cube.vertices = acquire_memory(&vertex_allocator, cube.num_vertices);
+    cube.indices  = acquire_memory(&index_allocator, cube.num_indices);
+    cube.colors   = acquire_memory(&color_allocator, cube.num_vertices);
+
+    /**
+     * The first 3 values of each vector define the x, y, and z coordinate.
+     * The 4th value is the homogenous coordinate, or w coordinate, and is included
+     * so that we can do more types of matrix transforms(translation, etc). Its useful
+     * to have a constant value that we can multiply by.
+     */
+    float len = side_width / 2;
+    GLfloat template_vertices[] = {
+            -len,  -len, -len, 1.0f,
+            len,   -len, -len, 1.0f,
+            len,   -len, len, 1.0f,
+            -len, -len, len, 1.0f,
+
+            -len, len, -len, 1.0f,
+            len,  len, -len, 1.0f,
+            len,  len, len,  1.0f,
+            -len, len, len,  1.0f,
+    };
+    memcpy(cube.vertices, template_vertices, sizeof(template_vertices));
+
+    GLuint template_indices[] = {
+            v_start + 0, v_start + 1, v_start + 2,
+            v_start + 0, v_start + 2, v_start + 3,
+
+            v_start + 1, v_start + 0, v_start + 4,
+            v_start + 1, v_start + 4, v_start + 5,
+
+            v_start + 2, v_start + 1, v_start + 5,
+            v_start + 2, v_start + 5, v_start + 6,
+
+            v_start + 3, v_start + 2, v_start + 7,
+            v_start + 2, v_start + 6, v_start + 7,
+
+            v_start + 3, v_start + 7, v_start + 4,
+            v_start + 3, v_start + 4, v_start + 0,
+
+            v_start + 4, v_start + 6, v_start + 5,
+            v_start + 4, v_start + 7, v_start + 6,
+    };
+    memcpy(cube.indices, template_indices, sizeof(template_indices));
+
+    GLfloat template_colors[] = {
+            1.0f, 1.0f, 1.0f,
+            1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f,
+            0.0f, 1.0f, 0.0f,
+
+            1.0f, 1.0f, 1.0f,
+            1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f,
+            0.0f, 1.0f, 0.0f,
+    };
+    memcpy(cube.colors, template_colors, sizeof(template_colors));
+
+    return cube;
+}
+
 void apply_matrix_transform(GLfloat* vertex_pointer, int num_vertices, float matrix[4][4]) {
     for(int vertex_idx = 0; vertex_idx < num_vertices; vertex_idx++) {
         int idx = vertex_idx * 4;
@@ -187,9 +255,6 @@ void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
     apply_matrix_transform(shape->vertices, shape->num_vertices, translation_matrix);
 }
 
-object_t pyramid1;
-object_t pyramid2;
-
 void print_float_buffer(GLfloat* buffer, int num_items) {
     int is_first = 1;
     for(int i = 0; i < num_items; i++) {
@@ -214,6 +279,8 @@ void print_int_buffer(GLuint* buffer, int num_items) {
     printf("\n");
 }
 
+object_t pyramid;
+object_t cube;
 
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -223,22 +290,15 @@ void display() {
     // TODO: Its probably better to apply all transforms to each vertex as we iterate instead of iterating multiple times.
     float transform_matrix[4][4];
 
-    vec3_t move_distance = {
-        .x = 0.2f * sin(time_delta / 10),
-        .y = 0, // 0.05f * time_delta,
-        .z = 0,
-    };
-    translate_object(&pyramid1, move_distance);
+    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
+    rotate_object(&cube, transform_matrix);
+    get_y_rotation_matrix(transform_matrix, 0.2f * time_delta);
+    rotate_object(&cube, transform_matrix);
 
-    get_x_rotation_matrix(transform_matrix, 3.13f * time_delta);
-    rotate_object(&pyramid1, transform_matrix);
-    get_y_rotation_matrix(transform_matrix, 4.7f * time_delta);
-    rotate_object(&pyramid1, transform_matrix);
-
-    get_x_rotation_matrix(transform_matrix, -3.0f * time_delta);
-    rotate_object(&pyramid2, transform_matrix);
-    get_y_rotation_matrix(transform_matrix, -10.0f * time_delta);
-    rotate_object(&pyramid2, transform_matrix);
+    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
+    rotate_object(&pyramid, transform_matrix);
+    get_y_rotation_matrix(transform_matrix, -0.8f * time_delta);
+    rotate_object(&pyramid, transform_matrix);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
@@ -259,6 +319,7 @@ void display() {
     glutSwapBuffers();
 }
 
+
 int main(int argc, char** argv) {
     last_frame_time = get_current_time();
 
@@ -266,8 +327,16 @@ int main(int argc, char** argv) {
     index_allocator = new_allocator(sizeof(GLuint) * 3, 1024);
     color_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
 
-    pyramid1 = create_pyramid(0, 0);
-    pyramid2 = create_pyramid(0, 0);
+//    pyramid1 = create_pyramid(0, 0);
+    pyramid = create_pyramid(0, 0);
+    cube = create_cube(0.4);
+
+    vec3_t distance = {.x = -0.5, .y = -0.5};
+    translate_object(&pyramid, distance);
+
+    distance.x = 0.5;
+    distance.y = 0.5;
+    translate_object(&cube, distance);
 
     glutInit(&argc, argv);
     glutCreateWindow("Jacks 3-Dimensional Wonderland");
