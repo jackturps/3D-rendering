@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <memory.h>
 #include <stdlib.h>
+#include "shaders.h"
 
 // Time since the last frame in seconds.
 double time_delta;
@@ -23,6 +24,8 @@ typedef struct {
     GLfloat* vertices;
     GLuint* indices;
     GLfloat* colors;
+
+    GLuint texture_id;
 
     int num_vertices;
     int num_indices;
@@ -53,6 +56,7 @@ void* acquire_memory(allocator_t* allocator, int num_items) {
 allocator_t vertex_allocator;
 allocator_t index_allocator;
 allocator_t color_allocator;
+allocator_t texture_allocator;
 
 double get_current_time() {
     struct timespec tp;
@@ -66,11 +70,66 @@ void update_time_delta() {
     last_frame_time = current_time;
 }
 
+void print_float_buffer(GLfloat* buffer, int num_items) {
+    int is_first = 1;
+    for(int i = 0; i < num_items; i++) {
+        if(!is_first) {
+            printf(", ");
+        }
+        printf("%f", buffer[i]);
+        is_first = 0;
+    }
+    printf("\n");
+}
+
+void print_int_buffer(GLuint* buffer, int num_items) {
+    int is_first = 1;
+    for(int i = 0; i < num_items; i++) {
+        if(!is_first) {
+            printf(", ");
+        }
+        printf("%d", buffer[i]);
+        is_first = 0;
+    }
+    printf("\n");
+}
+
+void get_texture_data(int texture_id) {
+// bind the texture object to the 2D texture target
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+
+// retrieve the texture image data
+    GLint level = 0; // mipmap level (0 for base level)
+    GLenum format = GL_RGBA; // format of the pixel data
+    GLenum type = GL_FLOAT; // data type of the pixel data
+    GLsizei width = 0; // width of the texture image (will be retrieved)
+    GLsizei height = 0; // height of the texture image (will be retrieved)
+    GLint imageSize = 0; // size of the image data (will be retrieved)
+    void* pixels = NULL; // pointer to the image data (will be retrieved)
+
+// get the width and height of the texture image
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_HEIGHT, &height);
+
+// allocate memory for the image data
+    imageSize = height * width * 4;
+    pixels = malloc(imageSize * sizeof(float));
+
+// retrieve the texture image data
+    glGetTexImage(GL_TEXTURE_2D, level, format, type, pixels);
+    print_float_buffer(pixels, imageSize);
+
+// free the image data memory
+    free(pixels);
+}
+
+
 object_t create_pyramid(float base_width, float height) {
     object_t triangle = {
         .position     = { .x = 0, .y = 0, .z = 0 },
         .num_vertices = 4,
         .num_indices  = 4,
+        .texture_id   = 0,
     };
     GLuint v_start = vertex_allocator.free_offset;
 
@@ -116,6 +175,7 @@ object_t create_cube(float side_width) {
             .position     = { .x = 0, .y = 0, .z = 0 },
             .num_vertices = 8,
             .num_indices  = 12,
+            .texture_id   = 0,
     };
     GLuint v_start = vertex_allocator.free_offset;
 
@@ -170,14 +230,81 @@ object_t create_cube(float side_width) {
             0.0f, 0.0f, 1.0f,
             0.0f, 1.0f, 0.0f,
 
-            1.0f, 1.0f, 1.0f,
+            0.0f, 1.0f, 0.0f,
             1.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f,
-            0.0f, 1.0f, 0.0f,
+            1.0f, 1.0f, 1.0f,
     };
     memcpy(cube.colors, template_colors, sizeof(template_colors));
 
     return cube;
+}
+
+object_t create_quad(float width, float height) {
+    object_t quad = {
+            .position     = { .x = 0, .y = 0, .z = 0 },
+            .num_vertices = 4,
+            .num_indices  = 2,
+            .texture_id   = 0,
+    };
+    GLuint v_start = vertex_allocator.free_offset;
+
+    quad.vertices = acquire_memory(&vertex_allocator, quad.num_vertices);
+    quad.indices  = acquire_memory(&index_allocator, quad.num_indices);
+    quad.colors   = acquire_memory(&color_allocator, quad.num_vertices);
+
+    GLfloat template_vertices[] = {
+        -width / 2,  -height / 2, 0.0f, 1.0f,
+        width / 2,   -height / 2, 0.0f, 1.0f,
+        -width / 2,  height / 2, 0.0f, 1.0f,
+        width / 2,   height / 2, 0.0f, 1.0f,
+    };
+    memcpy(quad.vertices, template_vertices, sizeof(template_vertices));
+
+    GLuint template_indices[] = {
+        0, 2, 1,
+        1, 2, 3,
+    };
+    memcpy(quad.indices, template_indices, sizeof(template_indices));
+
+    GLfloat template_colors[] = {
+            1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f,
+    };
+    memcpy(quad.colors, template_colors, sizeof(template_colors));
+
+
+    GLfloat texture_data[] = {
+            1.0f, 1.0f, 0.0f, 1.0f,
+            1.0f, 0.0f, 0.0f, 1.0f,
+            0.0f, 1.0f, 0.0f, 1.0f,
+            0.0f, 0.0f, 1.0f, 1.0f,
+    };
+    glGenTextures(1, &quad.texture_id);
+
+    glBindTexture(GL_TEXTURE_2D, quad.texture_id);
+
+    // Set wrapping properties(clamp just uses the edge pixel if we exceed the edge).
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Set the filtering properties for sampling.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    int texture_width = 2;
+    int texture_height = 2;
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height,
+        0, GL_RGBA, GL_FLOAT, texture_data
+    );
+
+    // Unbind the texture.
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return quad;
 }
 
 void apply_matrix_transform(GLfloat* vertex_pointer, int num_vertices, float matrix[4][4]) {
@@ -255,32 +382,14 @@ void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
     apply_matrix_transform(shape->vertices, shape->num_vertices, translation_matrix);
 }
 
-void print_float_buffer(GLfloat* buffer, int num_items) {
-    int is_first = 1;
-    for(int i = 0; i < num_items; i++) {
-        if(!is_first) {
-            printf(", ");
-        }
-        printf("%f", buffer[i]);
-        is_first = 0;
-    }
-    printf("\n");
-}
 
-void print_int_buffer(GLuint* buffer, int num_items) {
-    int is_first = 1;
-    for(int i = 0; i < num_items; i++) {
-        if(!is_first) {
-            printf(", ");
-        }
-        printf("%d", buffer[i]);
-        is_first = 0;
-    }
-    printf("\n");
-}
+GLuint shaderProgram;
+GLuint vertexShader;
+GLuint fragmentShader;
 
 object_t pyramid;
 object_t cube;
+object_t quad;
 
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -290,28 +399,61 @@ void display() {
     // TODO: Its probably better to apply all transforms to each vertex as we iterate instead of iterating multiple times.
     float transform_matrix[4][4];
 
-    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
-    rotate_object(&cube, transform_matrix);
-    get_y_rotation_matrix(transform_matrix, 0.2f * time_delta);
-    rotate_object(&cube, transform_matrix);
+//    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
+//    rotate_object(&cube, transform_matrix);
+    get_y_rotation_matrix(transform_matrix, 0.5f * time_delta);
+    rotate_object(&quad, transform_matrix);
+//
+//    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
+//    rotate_object(&pyramid, transform_matrix);
+//    get_y_rotation_matrix(transform_matrix, -0.8f * time_delta);
+//    rotate_object(&pyramid, transform_matrix);
 
-    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
-    rotate_object(&pyramid, transform_matrix);
-    get_y_rotation_matrix(transform_matrix, -0.8f * time_delta);
-    rotate_object(&pyramid, transform_matrix);
+    glUseProgram(shaderProgram);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_COLOR_ARRAY);
+    // This code draws the shapes with a texture.
+    // TODO: The built in texture mapping stuff is deprecated, switch to custom shaders.
+    GLfloat texture_uvs[] = {
+        0.0f, 0.0f,
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        1.0f, 1.0f,
+    };
 
-    // The first argument here specifies the size of each vertex/colour, not the number of items in the array.
-    glVertexPointer(4, GL_FLOAT, 0, vertex_allocator.buffer);
-    glColorPointer(3, GL_FLOAT, 0, color_allocator.buffer);
+    // Load the shapes texture.
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, quad.texture_id);
 
-    // The total number of items is specified HERE.
-    glDrawElements(GL_TRIANGLES, index_allocator.free_offset * 3, GL_UNSIGNED_INT, index_allocator.buffer);
+    // Create a vertex array object that we can use for assigning the vertex attribute arrays.
+    GLuint vertex_array_object;
+    glGenVertexArraysAPPLE(1, &vertex_array_object);
+    glBindVertexArrayAPPLE(vertex_array_object);
 
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_VERTEX_ARRAY);
+    // Setup the buffer for storing vertex data and assign it to the appropriate input in the shader.
+    GLuint vbo_vertices;
+    glGenBuffers(1, &vbo_vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_vertices);
+    glBufferData(GL_ARRAY_BUFFER, quad.num_vertices * 4 * sizeof(GLfloat), quad.vertices, GL_STATIC_DRAW);
+    GLint posAttrib = glGetAttribLocation(shaderProgram, "aPos");
+    glEnableVertexAttribArray(posAttrib);
+    glVertexAttribPointer(posAttrib, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+    // Do the same but for the texture UVs.
+    GLuint vbo_texture_coords;
+    glGenBuffers(1, &vbo_texture_coords);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_texture_coords);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(texture_uvs), texture_uvs, GL_STATIC_DRAW);
+    GLint texAttrib = glGetAttribLocation(shaderProgram, "aTexCoord");
+    glEnableVertexAttribArray(texAttrib);
+    glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+    // Set the texture sampler for the shader. Because we're using GL_TEXTURE0 we set this to 0.
+    GLint textureLocation = glGetUniformLocation(shaderProgram, "textureSampler");
+    glUniform1i(textureLocation, 0);  // Set the value of the uniform variable to 0 (texture unit 0)
+
+    // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
+    // need to go back to being relative to the entire vertex array.
+    glDrawElements(GL_TRIANGLES, quad.num_indices * 3, GL_UNSIGNED_INT, quad.indices);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -319,24 +461,58 @@ void display() {
     glutSwapBuffers();
 }
 
+void load_shader_program() {
+    // Compile the vertex shader.
+    vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
+    glCompileShader(vertexShader);
+
+    // Log and exit if the compilation failed.
+    int compile_success;
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &compile_success);
+    if (!compile_success) {
+        char infoLog[512];
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        printf("ERROR COMPILING VERTEX SHADER: %s\n", infoLog);
+        exit(1);
+    }
+
+    // Do the same for the fragment shader.
+    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+    glCompileShader(fragmentShader);
+    shaderProgram = glCreateProgram();
+
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &compile_success);
+    if (!compile_success) {
+        char infoLog[512];
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        printf("ERROR COMPILING FRAGMENT SHADER: %s\n", infoLog);
+        exit(1);
+    }
+
+    // Attach the vertex and fragment shaders to the shader program.
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+
+    // Link and use the shader program.
+    glLinkProgram(shaderProgram);
+
+    // Log and exit if there was a problem with the linking.
+    int linkStatus;
+    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &linkStatus);
+    if (linkStatus != GL_TRUE) {
+        char infoLog[512];
+        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+        printf("LINKING ERROR: %s\n", infoLog);
+        exit(1);
+    }
+
+    glUseProgram(shaderProgram);
+}
 
 int main(int argc, char** argv) {
     last_frame_time = get_current_time();
-
-    vertex_allocator = new_allocator(sizeof(GLfloat) * 4, 1024);
-    index_allocator = new_allocator(sizeof(GLuint) * 3, 1024);
-    color_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
-
-//    pyramid1 = create_pyramid(0, 0);
-    pyramid = create_pyramid(0, 0);
-    cube = create_cube(0.4);
-
-    vec3_t distance = {.x = -0.5, .y = -0.5};
-    translate_object(&pyramid, distance);
-
-    distance.x = 0.5;
-    distance.y = 0.5;
-    translate_object(&cube, distance);
 
     glutInit(&argc, argv);
     glutCreateWindow("Jacks 3-Dimensional Wonderland");
@@ -345,6 +521,32 @@ int main(int argc, char** argv) {
 
     // This enables z-buffering so pixels are occluded based on depth.
     glEnable(GL_DEPTH_TEST);
+
+
+    const char* version = (const char*)glGetString(GL_VERSION);
+    int major, minor;
+    sscanf(version, "%d.%d", &major, &minor);
+    printf("OpenGL version supported by your graphics card: %s\n", version);
+
+    load_shader_program();
+
+    // TODO: Should really only need a single allocator.
+    vertex_allocator = new_allocator(sizeof(GLfloat) * 4, 1024);
+    index_allocator = new_allocator(sizeof(GLuint) * 3, 1024);
+    color_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
+    texture_allocator = new_allocator(sizeof(GLfloat) * 4, 1024);
+
+//    pyramid1 = create_pyramid(0, 0);
+//    pyramid = create_pyramid(0, 0);
+//    cube = create_cube(0.5f);
+    quad = create_quad(0.8f, 0.4f);
+
+//    vec3_t distance = {.x = -0.5f, .y = -0.5f};
+//    translate_object(&pyramid, distance);
+//
+//    distance.x = 0.5;
+//    distance.y = 0.5;
+//    translate_object(&cube, distance);
 
     glutMainLoop();
     return 0;
