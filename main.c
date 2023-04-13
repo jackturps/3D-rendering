@@ -23,7 +23,8 @@ typedef struct {
 
     GLfloat* vertices;
     GLuint* indices;
-    GLfloat* colors;
+    GLfloat* texture_uvs; // TODO: Probably interleave with vertices.
+    GLfloat* colors; // TODO: Remove.
 
     GLuint texture_id;
 
@@ -55,8 +56,7 @@ void* acquire_memory(allocator_t* allocator, int num_items) {
 
 allocator_t vertex_allocator;
 allocator_t index_allocator;
-allocator_t color_allocator;
-allocator_t texture_allocator;
+allocator_t texture_uv_allocator;
 
 double get_current_time() {
     struct timespec tp;
@@ -124,18 +124,18 @@ void get_texture_data(int texture_id) {
 }
 
 
-object_t create_pyramid(float base_width, float height) {
+object_t create_pyramid(float base_width, float height, GLuint texture_id) {
     object_t triangle = {
         .position     = { .x = 0, .y = 0, .z = 0 },
         .num_vertices = 4,
         .num_indices  = 4,
-        .texture_id   = 0,
+        .texture_id   = texture_id,
     };
     GLuint v_start = vertex_allocator.free_offset;
 
     triangle.vertices = acquire_memory(&vertex_allocator, triangle.num_vertices);
     triangle.indices  = acquire_memory(&index_allocator, triangle.num_indices);
-    triangle.colors   = acquire_memory(&color_allocator, triangle.num_vertices);
+    triangle.colors   = acquire_memory(&texture_uv_allocator, triangle.num_vertices);
 
     /**
      * The first 3 values of each vector define the x, y, and z coordinate.
@@ -181,7 +181,7 @@ object_t create_cube(float side_width) {
 
     cube.vertices = acquire_memory(&vertex_allocator, cube.num_vertices);
     cube.indices  = acquire_memory(&index_allocator, cube.num_indices);
-    cube.colors   = acquire_memory(&color_allocator, cube.num_vertices);
+    cube.colors   = acquire_memory(&texture_uv_allocator, cube.num_vertices);
 
     /**
      * The first 3 values of each vector define the x, y, and z coordinate.
@@ -240,18 +240,18 @@ object_t create_cube(float side_width) {
     return cube;
 }
 
-object_t create_quad(float width, float height) {
+object_t create_quad(float width, float height, GLuint texture_id) {
     object_t quad = {
             .position     = { .x = 0, .y = 0, .z = 0 },
             .num_vertices = 4,
             .num_indices  = 2,
-            .texture_id   = 0,
+            .texture_id   = texture_id,
     };
     GLuint v_start = vertex_allocator.free_offset;
 
-    quad.vertices = acquire_memory(&vertex_allocator, quad.num_vertices);
-    quad.indices  = acquire_memory(&index_allocator, quad.num_indices);
-    quad.colors   = acquire_memory(&color_allocator, quad.num_vertices);
+    quad.vertices    = acquire_memory(&vertex_allocator, quad.num_vertices);
+    quad.indices     = acquire_memory(&index_allocator, quad.num_indices);
+    quad.texture_uvs = acquire_memory(&index_allocator, quad.num_vertices);
 
     GLfloat template_vertices[] = {
         -width / 2,  -height / 2, 0.0f, 1.0f,
@@ -267,42 +267,13 @@ object_t create_quad(float width, float height) {
     };
     memcpy(quad.indices, template_indices, sizeof(template_indices));
 
-    GLfloat template_colors[] = {
-            1.0f, 1.0f, 1.0f,
-            1.0f, 1.0f, 1.0f,
-            1.0f, 1.0f, 1.0f,
-            1.0f, 1.0f, 1.0f,
+    GLfloat texture_uvs[] = {
+            0.0f, 0.0f,
+            1.0f, 0.0f,
+            0.0f, 1.0f,
+            1.0f, 1.0f,
     };
-    memcpy(quad.colors, template_colors, sizeof(template_colors));
-
-
-    GLfloat texture_data[] = {
-            1.0f, 1.0f, 0.0f, 1.0f,
-            1.0f, 0.0f, 0.0f, 1.0f,
-            0.0f, 1.0f, 0.0f, 1.0f,
-            0.0f, 0.0f, 1.0f, 1.0f,
-    };
-    glGenTextures(1, &quad.texture_id);
-
-    glBindTexture(GL_TEXTURE_2D, quad.texture_id);
-
-    // Set wrapping properties(clamp just uses the edge pixel if we exceed the edge).
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    // Set the filtering properties for sampling.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    int texture_width = 2;
-    int texture_height = 2;
-    glTexImage2D(
-        GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height,
-        0, GL_RGBA, GL_FLOAT, texture_data
-    );
-
-    // Unbind the texture.
-    glBindTexture(GL_TEXTURE_2D, 0);
+    memcpy(quad.texture_uvs, texture_uvs, sizeof(texture_uvs));
 
     return quad;
 }
@@ -363,6 +334,37 @@ void translate_object(object_t* shape, vec3_t distance) {
     shape->position = add_vectors(shape->position, distance);
 }
 
+void init_textures(GLuint* out_texture_id) {
+    GLfloat texture_data[] = {
+            1.0f, 1.0f, 0.0f, 1.0f,
+            1.0f, 0.0f, 0.0f, 1.0f,
+            0.0f, 1.0f, 0.0f, 1.0f,
+            0.0f, 0.0f, 1.0f, 1.0f,
+    };
+    glGenTextures(1, out_texture_id);
+
+    glBindTexture(GL_TEXTURE_2D, *out_texture_id);
+
+    // Set wrapping properties(clamp just uses the edge pixel if we exceed the edge).
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Set the filtering properties for sampling.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    int texture_width = 2;
+    int texture_height = 2;
+    glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height,
+            0, GL_RGBA, GL_FLOAT, texture_data
+    );
+
+    // Unbind the texture.
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+}
+
 void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
     /**
      * All rotations happen around the origin so we need to translate back to the origin before rotating,
@@ -386,6 +388,8 @@ void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
 GLuint shaderProgram;
 GLuint vertexShader;
 GLuint fragmentShader;
+
+GLuint technicolor_texture;
 
 object_t pyramid;
 object_t cube;
@@ -412,13 +416,6 @@ void display() {
     glUseProgram(shaderProgram);
 
     // This code draws the shapes with a texture.
-    // TODO: The built in texture mapping stuff is deprecated, switch to custom shaders.
-    GLfloat texture_uvs[] = {
-        0.0f, 0.0f,
-        1.0f, 0.0f,
-        0.0f, 1.0f,
-        1.0f, 1.0f,
-    };
 
     // Load the shapes texture.
     glActiveTexture(GL_TEXTURE0);
@@ -442,7 +439,7 @@ void display() {
     GLuint vbo_texture_coords;
     glGenBuffers(1, &vbo_texture_coords);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_texture_coords);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(texture_uvs), texture_uvs, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, quad.num_vertices * 2 * sizeof(GLfloat), quad.texture_uvs, GL_STATIC_DRAW);
     GLint texAttrib = glGetAttribLocation(shaderProgram, "aTexCoord");
     glEnableVertexAttribArray(texAttrib);
     glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
@@ -459,6 +456,7 @@ void display() {
     glLoadIdentity();
 
     glutSwapBuffers();
+    glutPostRedisplay();
 }
 
 void load_shader_program() {
@@ -517,10 +515,9 @@ int main(int argc, char** argv) {
     glutInit(&argc, argv);
     glutCreateWindow("Jacks 3-Dimensional Wonderland");
     glutDisplayFunc(display);
-    glutIdleFunc(display);
 
     // This enables z-buffering so pixels are occluded based on depth.
-    glEnable(GL_DEPTH_TEST);
+    glEnable(GLUT_DOUBLE| GL_DEPTH_TEST);
 
 
     const char* version = (const char*)glGetString(GL_VERSION);
@@ -531,15 +528,16 @@ int main(int argc, char** argv) {
     load_shader_program();
 
     // TODO: Should really only need a single allocator.
-    vertex_allocator = new_allocator(sizeof(GLfloat) * 4, 1024);
-    index_allocator = new_allocator(sizeof(GLuint) * 3, 1024);
-    color_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
-    texture_allocator = new_allocator(sizeof(GLfloat) * 4, 1024);
+    vertex_allocator     = new_allocator(sizeof(GLfloat) * 4, 1024);
+    index_allocator      = new_allocator(sizeof(GLuint) * 3, 1024);
+    texture_uv_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
 
-//    pyramid1 = create_pyramid(0, 0);
+    init_textures(&technicolor_texture);
+
+//    pyramid1 = create_pyramid(0, 0, technicolor_texture);
 //    pyramid = create_pyramid(0, 0);
 //    cube = create_cube(0.5f);
-    quad = create_quad(0.8f, 0.4f);
+    quad = create_quad(0.8f, 0.4f, technicolor_texture);
 
 //    vec3_t distance = {.x = -0.5f, .y = -0.5f};
 //    translate_object(&pyramid, distance);
