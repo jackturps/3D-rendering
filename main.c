@@ -135,7 +135,7 @@ object_t create_pyramid(float base_width, float height, GLuint texture_id) {
 
     triangle.vertices = acquire_memory(&vertex_allocator, triangle.num_vertices);
     triangle.indices  = acquire_memory(&index_allocator, triangle.num_indices);
-    triangle.colors   = acquire_memory(&texture_uv_allocator, triangle.num_vertices);
+    triangle.texture_uvs   = acquire_memory(&texture_uv_allocator, triangle.num_vertices);
 
     /**
      * The first 3 values of each vector define the x, y, and z coordinate.
@@ -159,13 +159,13 @@ object_t create_pyramid(float base_width, float height, GLuint texture_id) {
     };
     memcpy(triangle.indices, template_indices, sizeof(template_indices));
 
-    GLfloat template_colors[] = {
-        1.0f, 1.0f, 1.0f,
-        1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f,
-        0.0f, 1.0f, 0.0f,
+    GLfloat texture_uvs[] = {
+            0.0f, 0.0f,
+            1.0f, 0.0f,
+            0.0f, 1.0f,
+            1.0f, 1.0f,
     };
-    memcpy(triangle.colors, template_colors, sizeof(template_colors));
+    memcpy(triangle.texture_uvs, texture_uvs, sizeof(texture_uvs));
 
     return triangle;
 }
@@ -537,7 +537,8 @@ int main(int argc, char** argv) {
 //    pyramid1 = create_pyramid(0, 0, technicolor_texture);
 //    pyramid = create_pyramid(0, 0);
 //    cube = create_cube(0.5f);
-    quad = create_quad(0.8f, 0.4f, technicolor_texture);
+//    quad = create_quad(0.8f, 0.4f, technicolor_texture);
+    quad = create_pyramid(0.8f, 0.4f, technicolor_texture);
 
 //    vec3_t distance = {.x = -0.5f, .y = -0.5f};
 //    translate_object(&pyramid, distance);
