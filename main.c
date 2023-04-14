@@ -5,11 +5,15 @@
 #include <printf.h>
 #include <sys/time.h>
 #include <memory.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "shaders.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
+
+#include "cJSON/cJSON.h"
+#include "base64/base64.h"
 
 
 // Time since the last frame in seconds.
@@ -74,13 +78,16 @@ void update_time_delta() {
     last_frame_time = current_time;
 }
 
-void print_float_buffer(GLfloat* buffer, int num_items) {
+void print_float_buffer(GLfloat* buffer, int num_items, int items_per_line) {
     int is_first = 1;
     for(int i = 0; i < num_items; i++) {
         if(!is_first) {
             printf(", ");
         }
-        printf("%f", buffer[i]);
+        if(items_per_line != 0 && i % items_per_line == 0) {
+            printf("\n%d: ", i / items_per_line);
+        }
+        printf("%.2f", buffer[i]);
         is_first = 0;
     }
     printf("\n");
@@ -121,7 +128,7 @@ void get_texture_data(int texture_id) {
 
 // retrieve the texture image data
     glGetTexImage(GL_TEXTURE_2D, level, format, type, pixels);
-    print_float_buffer(pixels, imageSize);
+    print_float_buffer(pixels, imageSize, 0);
 
 // free the image data memory
     free(pixels);
@@ -174,18 +181,18 @@ object_t create_pyramid(float base_width, float height, GLuint texture_id) {
     return triangle;
 }
 
-object_t create_cube(float side_width) {
+object_t create_cube(float side_width, GLuint texture_id) {
     object_t cube = {
             .position     = { .x = 0, .y = 0, .z = 0 },
             .num_vertices = 8,
             .num_indices  = 12,
-            .texture_id   = 0,
+            .texture_id   = texture_id,
     };
     GLuint v_start = vertex_allocator.free_offset;
 
     cube.vertices = acquire_memory(&vertex_allocator, cube.num_vertices);
     cube.indices  = acquire_memory(&index_allocator, cube.num_indices);
-    cube.colors   = acquire_memory(&texture_uv_allocator, cube.num_vertices);
+    cube.texture_uvs   = acquire_memory(&texture_uv_allocator, cube.num_vertices);
 
     /**
      * The first 3 values of each vector define the x, y, and z coordinate.
@@ -228,18 +235,18 @@ object_t create_cube(float side_width) {
     };
     memcpy(cube.indices, template_indices, sizeof(template_indices));
 
-    GLfloat template_colors[] = {
-            1.0f, 1.0f, 1.0f,
-            1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f,
-            0.0f, 1.0f, 0.0f,
+    GLfloat template_uvs[] = {
+            0.0f, 1.0f,
+            1.0f, 1.0f,
+            0.0f, 0.0f,
+            1.0f, 0.0f,
 
-            0.0f, 1.0f, 0.0f,
-            1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f,
-            1.0f, 1.0f, 1.0f,
+            1.0f, 0.0f,
+            0.0f, 0.0f,
+            1.0f, 1.0f,
+            0.0f, 1.0f,
     };
-    memcpy(cube.colors, template_colors, sizeof(template_colors));
+    memcpy(cube.texture_uvs, template_uvs, sizeof(template_uvs));
 
     return cube;
 }
@@ -429,64 +436,72 @@ GLuint technicolor_texture;
 object_t pyramid;
 object_t cube;
 object_t quad;
+object_t model;
+
+GLuint gl_vertex_array_object;
+GLuint gl_vertex_buffer;
+GLuint gl_texture_uv_buffer;
+
+double total_time = 0;
 
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     update_time_delta();
+    total_time += time_delta;
 
     // TODO: Its probably better to apply all transforms to each vertex as we iterate instead of iterating multiple times.
     float transform_matrix[4][4];
 
 //    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
 //    rotate_object(&cube, transform_matrix);
-    get_y_rotation_matrix(transform_matrix, 0.5f * time_delta);
-    rotate_object(&quad, transform_matrix);
-//
+    get_y_rotation_matrix(transform_matrix, 0.5 * time_delta);
+    rotate_object(&model, transform_matrix);
+
+//    vec3_t distance = {.x = 0, .y = 0, .z = -0.1f * time_delta};
+//    translate_object(&model, distance);
 //    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
-//    rotate_object(&pyramid, transform_matrix);
+//    rotate_object(&model, transform_matrix);
 //    get_y_rotation_matrix(transform_matrix, -0.8f * time_delta);
 //    rotate_object(&pyramid, transform_matrix);
 
-    glUseProgram(shaderProgram);
+//    printf("============\n\n");
+//    print_float_buffer(model.vertices, model.num_vertices * 3, 4);
+//    exit(-1);
 
     // This code draws the shapes with a texture.
 
     // Load the shapes texture.
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, quad.texture_id);
+    glBindTexture(GL_TEXTURE_2D, model.texture_id);
 
-    // Create a vertex array object that we can use for assigning the vertex attribute arrays.
-    GLuint vertex_array_object;
-    glGenVertexArraysAPPLE(1, &vertex_array_object);
-    glBindVertexArrayAPPLE(vertex_array_object);
+    // Tell open GL to update the vertex and texture buffers with the new data.
+    // TODO: We only need to update vertices that have moved since last frame.
+    glBindBuffer(GL_ARRAY_BUFFER, gl_vertex_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, model.num_vertices * 4 * sizeof(GLfloat), model.vertices);
 
-    // TODO: Pretty sure this is allocating on every draw! Fix immediately!
-    // Setup the buffer for storing vertex data and assign it to the appropriate input in the shader.
-    GLuint vbo_vertices;
-    glGenBuffers(1, &vbo_vertices);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_vertices);
-    glBufferData(GL_ARRAY_BUFFER, quad.num_vertices * 4 * sizeof(GLfloat), quad.vertices, GL_STATIC_DRAW);
-    GLint posAttrib = glGetAttribLocation(shaderProgram, "aPos");
-    glEnableVertexAttribArray(posAttrib);
-    glVertexAttribPointer(posAttrib, 4, GL_FLOAT, GL_FALSE, 0, 0);
-
-    // Do the same but for the texture UVs.
-    GLuint vbo_texture_coords;
-    glGenBuffers(1, &vbo_texture_coords);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_texture_coords);
-    glBufferData(GL_ARRAY_BUFFER, quad.num_vertices * 2 * sizeof(GLfloat), quad.texture_uvs, GL_STATIC_DRAW);
-    GLint texAttrib = glGetAttribLocation(shaderProgram, "aTexCoord");
-    glEnableVertexAttribArray(texAttrib);
-    glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    // TODO: I think its pretty unlikely for texture UVs to change for an existing shape, this probably doesn't need
+    // to happen each frame.
+    glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, model.num_vertices * 2 * sizeof(GLfloat), model.texture_uvs);
 
     // Set the texture sampler for the shader. Because we're using GL_TEXTURE0 we set this to 0.
     GLint textureLocation = glGetUniformLocation(shaderProgram, "textureSampler");
     glUniform1i(textureLocation, 0);  // Set the value of the uniform variable to 0 (texture unit 0)
 
+//    size_t num_indices = total_time;
+
+//    for(int i = 0; i < model.num_vertices; i++) {
+//        int vertex_idx = i * 4;
+//        if(model.vertices[vertex_idx + 1] > 0.9) {
+//            printf("Vertex %d has a big Y %.2f\n", i, model.vertices[vertex_idx + 1]);
+//        }
+//    }
+//    printf("\n");
+
     // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
     // need to go back to being relative to the entire vertex array.
-    glDrawElements(GL_TRIANGLES, quad.num_indices * 3, GL_UNSIGNED_INT, quad.indices);
+    glDrawElements(GL_TRIANGLES, model.num_indices * 3, GL_UNSIGNED_INT, model.indices);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -567,27 +582,164 @@ int main(int argc, char** argv) {
 
     load_shader_program();
 
+    init_textures(&technicolor_texture);
+
+    // Read and parse model file.
+    char* model_path = "/Users/jack/workspace/3d/models/ship_model.gltf";
+//    char* model_path = "/Users/jack/workspace/3d/models/cube.gltf";
+    FILE* file = fopen(model_path, "r");
+    if(!file) {
+       printf("Failed to open model file.");
+       exit(-1);
+    }
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *json_buffer = (char*)malloc(file_size);
+
+    size_t bytes_read = fread(json_buffer, 1, file_size, file);
+    if(bytes_read != file_size) {
+        printf("failed to read entire model file(%lu out of an expected %lu).\n", bytes_read, file_size);
+        exit(-1);
+    }
+    fclose(file);
+
+    cJSON* json = cJSON_ParseWithLength(json_buffer, file_size);
+    if(!json) {
+        const char* error_str = cJSON_GetErrorPtr();
+        if(error_str != NULL) {
+            printf("Failed to parse model file: %s\n", error_str);
+        }
+        cJSON_Delete(json);
+        free(json_buffer);
+        exit(-1);
+    }
+    free(json_buffer);
+
+    // TODO: Check that the JSON structure is as expected as we go.
+    cJSON* model_buffers = cJSON_GetObjectItem(json, "buffers");
+    cJSON* model_buffer  = cJSON_GetArrayItem(model_buffers, 0);
+    cJSON* model_uri     = cJSON_GetObjectItem(model_buffer, "uri");
+    char* model_uri_base64 = cJSON_GetStringValue(model_uri);
+
+    size_t model_data_size;
+    // TODO: Skip the prefix a bit more robustly.
+    // TODO: I think the gltf tells us how big we can expect the output buffer to be. Use this to allocate up front?
+    char* model_data = base64_decode(&model_uri_base64[37], strlen(model_uri_base64) - 37, &model_data_size);
+    if(model_data == NULL) {
+        printf("Failed to parse model's base64 data.\n");
+        exit(-1);
+    }
+    cJSON_Delete(json);
+
+    /**
+     * Notes on parsing .gltf files correctly: The "buffers" define large portions of data that are accessed
+     * different ways for different things(vertices, texture UVs, etc). If we look in "meshes" we can see how
+     * to access the different attributes(POSITION=vertices, TEXCOORD=uvs, indices=indices, etc). Each attribute
+     * points to an "accessor". The accessor tells us how many items we can expect, what type the items
+     * are(5126=float, 5123=unsigned short, etc), etc. The accessors point to a "bufferView" which in turn tell
+     * us how to actually pull that type of data out of the big data buffer(offset, stride, length, etc).
+     *
+     * We should take all of this into account but I'm going to hardcode everything I can to start with. For example
+     * the offset and length values here are currently hardcoded from reading the gltf file with my human eyes.
+     */
+    printf("System float size: %lu\n", sizeof(GLfloat));
+    printf("System short size: %lu\n", sizeof(unsigned short));
+
+
+    model.texture_id = technicolor_texture;
+    model.position.x = 0;
+    model.position.y = 0;
+    model.position.z = 0;
+
+    size_t num_bytes = 1872; // For ship model.
+//    size_t num_bytes = 288; // For cube model.
+    size_t num_floats = num_bytes / sizeof(GLfloat);
+    model.num_vertices = num_floats / 3;
+    printf("%d vertices in model\n", model.num_vertices);
+    model.vertices = malloc(model.num_vertices * 4 * sizeof(GLfloat));
+    model.texture_uvs = malloc(model.num_vertices * 2 * sizeof(GLfloat));
+    GLfloat* vertex_data = (GLfloat*)model_data;
+    for(int i = 0; i < model.num_vertices; i++) {
+        int output_idx = i * 4;
+        // The gltf format does not include the w property of the vector.
+        int input_idx = i * 3;
+        model.vertices[output_idx + 0] = vertex_data[input_idx + 0];
+        model.vertices[output_idx + 1] = vertex_data[input_idx + 1];
+        model.vertices[output_idx + 2] = vertex_data[input_idx + 2];
+        model.vertices[output_idx + 3] = 1.0f;
+
+        // TODO: Read texture UVs from file.
+        int uv_idx = i * 2;
+        model.texture_uvs[uv_idx]     = (float)rand() / (float)RAND_MAX;
+        model.texture_uvs[uv_idx + 1] = (float)rand() / (float)RAND_MAX;
+    }
+//    print_float_buffer(model.vertices, model.num_vertices * 4, 4);
+//    printf("\n=======================\n");
+
+    num_bytes = 456; // For ship.
+    size_t indices_offset = 4992; // For ship.
+    size_t num_shorts = num_bytes / sizeof(unsigned short);
+    model.num_indices = num_shorts / 3;
+    printf("%d indices in model\n", model.num_indices);
+    model.indices = malloc(num_shorts * sizeof(GLuint));
+    unsigned short* index_data = (unsigned short*)(model_data + indices_offset);
+    for(int i = 0; i < num_shorts; i++) {
+        model.indices[i] = (GLuint)index_data[i];
+//        printf("%d:%d, ", model.indices[i], (GLuint)index_data[i]);
+    }
+//    printf("\n");
+
+    free(model_data);
+
+
+
     // TODO: Should really only need a single allocator.
     vertex_allocator     = new_allocator(sizeof(GLfloat) * 4, 1024);
     index_allocator      = new_allocator(sizeof(GLuint) * 3, 1024);
     texture_uv_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
 
-    init_textures(&technicolor_texture);
-
 //    pyramid1 = create_pyramid(0, 0, technicolor_texture);
 //    pyramid = create_pyramid(0, 0);
 //    cube = create_cube(0.5f);
-    quad = create_quad(0.8f, 0.4f, technicolor_texture);
+//    quad = create_quad(0.8f, 0.4f, technicolor_texture);
 //    quad = create_pyramid(0.8f, 0.4f, technicolor_texture);
+//    quad = create_cube(0.8f, technicolor_texture);
 
-//    vec3_t distance = {.x = -0.5f, .y = -0.5f};
-//    translate_object(&pyramid, distance);
+    vec3_t distance = {.x = 0, .y = 0, .z = 0.7f};
+    translate_object(&model, distance);
 //
 //    distance.x = 0.5;
 //    distance.y = 0.5;
 //    translate_object(&cube, distance);
 
+
+    // Create a vertex array object that we can use for assigning the vertex attribute arrays.
+    glGenVertexArraysAPPLE(1, &gl_vertex_array_object);
+    glBindVertexArrayAPPLE(gl_vertex_array_object);
+
+    // TODO: Pretty sure this is allocating on every draw! Fix immediately!
+    // Setup the json_buffer for storing vertex data and assign it to the appropriate input in the shader.
+    glGenBuffers(1, &gl_vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, gl_vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, model.num_vertices * 4 * sizeof(GLfloat), model.vertices, GL_STATIC_DRAW);
+    GLint posAttrib = glGetAttribLocation(shaderProgram, "aPos");
+    glEnableVertexAttribArray(posAttrib);
+    glVertexAttribPointer(posAttrib, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+    // Do the same but for the texture UVs.
+    glGenBuffers(1, &gl_texture_uv_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
+    glBufferData(GL_ARRAY_BUFFER, model.num_vertices * 2 * sizeof(GLfloat), model.texture_uvs, GL_STATIC_DRAW);
+    GLint texAttrib = glGetAttribLocation(shaderProgram, "aTexCoord");
+    glEnableVertexAttribArray(texAttrib);
+    glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+
+
     glutMainLoop();
+
     return 0;
 }
 
