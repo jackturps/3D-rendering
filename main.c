@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include "shaders.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
+
 // Time since the last frame in seconds.
 double time_delta;
 double last_frame_time;
@@ -152,8 +156,8 @@ object_t create_pyramid(float base_width, float height, GLuint texture_id) {
     memcpy(triangle.vertices, template_vertices, sizeof(template_vertices));
 
     GLuint template_indices[] = {
-        v_start + 0, v_start + 1, v_start + 2,
-        v_start + 0, v_start + 2, v_start + 3,
+        v_start + 0, v_start + 2, v_start + 1,
+        v_start + 0, v_start + 3, v_start + 2,
         v_start + 0, v_start + 1, v_start + 3,
         v_start + 1, v_start + 2, v_start + 3,
     };
@@ -268,10 +272,10 @@ object_t create_quad(float width, float height, GLuint texture_id) {
     memcpy(quad.indices, template_indices, sizeof(template_indices));
 
     GLfloat texture_uvs[] = {
-            0.0f, 0.0f,
-            1.0f, 0.0f,
             0.0f, 1.0f,
             1.0f, 1.0f,
+            0.0f, 0.0f,
+            1.0f, 0.0f,
     };
     memcpy(quad.texture_uvs, texture_uvs, sizeof(texture_uvs));
 
@@ -335,14 +339,46 @@ void translate_object(object_t* shape, vec3_t distance) {
 }
 
 void init_textures(GLuint* out_texture_id) {
-    GLfloat texture_data[] = {
-            1.0f, 1.0f, 0.0f, 1.0f,
-            1.0f, 0.0f, 0.0f, 1.0f,
-            0.0f, 1.0f, 0.0f, 1.0f,
-            0.0f, 0.0f, 1.0f, 1.0f,
-    };
-    glGenTextures(1, out_texture_id);
+    // /Users/jack/Downloads/Free 39 Portraits Pixel Art/2 Portraits with back
 
+    // TODO: Use our own memory instead of STBI stuff.
+    // TODO: if we load into floats, or pass ints to opengl, we can directly use the loaded buffer to provide the texture.
+    int image_width, image_height, channels;
+    char* image_path = "/Users/jack/Downloads/Free 39 Portraits Pixel Art/2 Portraits with back/Icons_05.png";
+    unsigned char* image_data = stbi_load(image_path, &image_width, &image_height, &channels, STBI_rgb);
+    if(image_data == NULL) {
+        const char* error = stbi_failure_reason();
+        printf("Failed to load image: %s\n", error);
+        exit(-1);
+    }
+
+    printf("Loaded %dx%d image with %d channels.\n", image_width, image_height, channels);
+    GLfloat* texture_data = (GLfloat*)malloc(image_width * image_height * 4 * sizeof(GLfloat));
+    for (int pixel_idx = 0; pixel_idx < image_width * image_height; pixel_idx += 1) {
+        int texture_offset = pixel_idx * 4;
+        int image_offset = pixel_idx * 3;
+        texture_data[texture_offset+0] = image_data[image_offset + 0] / 255.0f;
+        texture_data[texture_offset+1] = image_data[image_offset + 1] / 255.0f;
+        texture_data[texture_offset+2] = image_data[image_offset + 2] / 255.0f;
+        texture_data[texture_offset+3] = 1.0f;
+//        printf(
+//                "%d, %d, %d\n",
+//                image_data[image_offset+0],
+//                image_data[image_offset+1],
+//                image_data[image_offset+2]
+//        );
+//        printf(
+//                "%.3f, %.3f, %.3f, %.3f\n",
+//                texture_data[texture_offset+0],
+//                texture_data[texture_offset+1],
+//                texture_data[texture_offset+2],
+//                texture_data[texture_offset+3]
+//        );
+    }
+
+    stbi_image_free(image_data);
+
+    glGenTextures(1, out_texture_id);
     glBindTexture(GL_TEXTURE_2D, *out_texture_id);
 
     // Set wrapping properties(clamp just uses the edge pixel if we exceed the edge).
@@ -350,19 +386,18 @@ void init_textures(GLuint* out_texture_id) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // Set the filtering properties for sampling.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    int texture_width = 2;
-    int texture_height = 2;
     glTexImage2D(
-            GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height,
+            GL_TEXTURE_2D, 0, GL_RGBA, image_width, image_height,
             0, GL_RGBA, GL_FLOAT, texture_data
     );
 
     // Unbind the texture.
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    free(texture_data);
 }
 
 void rotate_object(object_t* shape, float rotation_matrix[4][4]) {
@@ -426,6 +461,7 @@ void display() {
     glGenVertexArraysAPPLE(1, &vertex_array_object);
     glBindVertexArrayAPPLE(vertex_array_object);
 
+    // TODO: Pretty sure this is allocating on every draw! Fix immediately!
     // Setup the buffer for storing vertex data and assign it to the appropriate input in the shader.
     GLuint vbo_vertices;
     glGenBuffers(1, &vbo_vertices);
@@ -519,6 +555,10 @@ int main(int argc, char** argv) {
     // This enables z-buffering so pixels are occluded based on depth.
     glEnable(GLUT_DOUBLE| GL_DEPTH_TEST);
 
+    // Enable backface culling and set the winding order to counter clockwise.
+//    glEnable(GL_CULL_FACE);
+//    glCullFace(GL_BACK);
+//    glFrontFace(GL_CCW);
 
     const char* version = (const char*)glGetString(GL_VERSION);
     int major, minor;
@@ -537,8 +577,8 @@ int main(int argc, char** argv) {
 //    pyramid1 = create_pyramid(0, 0, technicolor_texture);
 //    pyramid = create_pyramid(0, 0);
 //    cube = create_cube(0.5f);
-//    quad = create_quad(0.8f, 0.4f, technicolor_texture);
-    quad = create_pyramid(0.8f, 0.4f, technicolor_texture);
+    quad = create_quad(0.8f, 0.4f, technicolor_texture);
+//    quad = create_pyramid(0.8f, 0.4f, technicolor_texture);
 
 //    vec3_t distance = {.x = -0.5f, .y = -0.5f};
 //    translate_object(&pyramid, distance);
