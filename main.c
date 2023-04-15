@@ -617,6 +617,20 @@ int main(int argc, char** argv) {
     }
     free(json_buffer);
 
+    cJSON* buffer_views  = cJSON_GetObjectItem(json, "bufferViews");
+
+    cJSON* vertex_buffer_view = cJSON_GetArrayItem(buffer_views, 0);
+    cJSON* vertex_data_offset_json = cJSON_GetObjectItem(vertex_buffer_view, "byteOffset");
+    cJSON* vertex_data_size_json = cJSON_GetObjectItem(vertex_buffer_view, "byteLength");
+    size_t vertex_data_offset = cJSON_GetNumberValue(vertex_data_offset_json);
+    size_t vertex_data_size = cJSON_GetNumberValue(vertex_data_size_json);
+
+    cJSON* index_buffer_view = cJSON_GetArrayItem(buffer_views, 3);
+    cJSON* index_data_offset_json = cJSON_GetObjectItem(index_buffer_view, "byteOffset");
+    cJSON* index_data_size_json = cJSON_GetObjectItem(index_buffer_view, "byteLength");
+    size_t index_data_offset = cJSON_GetNumberValue(index_data_offset_json);
+    size_t index_data_size = cJSON_GetNumberValue(index_data_size_json);
+
     // TODO: Check that the JSON structure is as expected as we go.
     cJSON* model_buffers = cJSON_GetObjectItem(json, "buffers");
     cJSON* model_buffer  = cJSON_GetArrayItem(model_buffers, 0);
@@ -653,14 +667,14 @@ int main(int argc, char** argv) {
     model.position.y = 0;
     model.position.z = 0;
 
-    size_t num_bytes = 1872; // For ship model.
+//    size_t num_bytes = 1872; // For ship model.
 //    size_t num_bytes = 288; // For cube model.
-    size_t num_floats = num_bytes / sizeof(GLfloat);
+    size_t num_floats = vertex_data_size / sizeof(GLfloat);
     model.num_vertices = num_floats / 3;
     printf("%d vertices in model\n", model.num_vertices);
     model.vertices = malloc(model.num_vertices * 4 * sizeof(GLfloat));
     model.texture_uvs = malloc(model.num_vertices * 2 * sizeof(GLfloat));
-    GLfloat* vertex_data = (GLfloat*)model_data;
+    GLfloat* vertex_data = (GLfloat*)(model_data + vertex_data_offset);
     for(int i = 0; i < model.num_vertices; i++) {
         int output_idx = i * 4;
         // The gltf format does not include the w property of the vector.
@@ -672,19 +686,17 @@ int main(int argc, char** argv) {
 
         // TODO: Read texture UVs from file.
         int uv_idx = i * 2;
-        model.texture_uvs[uv_idx]     = (float)rand() / (float)RAND_MAX;
-        model.texture_uvs[uv_idx + 1] = (float)rand() / (float)RAND_MAX;
+        model.texture_uvs[uv_idx]     = 0.5f;//(float)rand() / (float)RAND_MAX;
+        model.texture_uvs[uv_idx + 1] = 0.5f;//(float)rand() / (float)RAND_MAX;
     }
 //    print_float_buffer(model.vertices, model.num_vertices * 4, 4);
 //    printf("\n=======================\n");
 
-    num_bytes = 456; // For ship.
-    size_t indices_offset = 4992; // For ship.
-    size_t num_shorts = num_bytes / sizeof(unsigned short);
+    size_t num_shorts = index_data_size / sizeof(unsigned short);
     model.num_indices = num_shorts / 3;
     printf("%d indices in model\n", model.num_indices);
     model.indices = malloc(num_shorts * sizeof(GLuint));
-    unsigned short* index_data = (unsigned short*)(model_data + indices_offset);
+    unsigned short* index_data = (unsigned short*)(model_data + index_data_offset);
     for(int i = 0; i < num_shorts; i++) {
         model.indices[i] = (GLuint)index_data[i];
 //        printf("%d:%d, ", model.indices[i], (GLuint)index_data[i]);
