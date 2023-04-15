@@ -442,6 +442,7 @@ object_t pyramid;
 object_t cube;
 object_t quad;
 object_t ship_model;
+object_t cube_model;
 
 GLuint gl_vertex_array_object;
 GLuint gl_vertex_buffer;
@@ -463,6 +464,11 @@ void display() {
     get_y_rotation_matrix(transform_matrix, 0.5 * time_delta);
     rotate_object(&ship_model, transform_matrix);
 
+    get_x_rotation_matrix(transform_matrix, -0.63f * time_delta);
+    rotate_object(&cube_model, transform_matrix);
+    get_y_rotation_matrix(transform_matrix, -0.5 * time_delta);
+    rotate_object(&cube_model, transform_matrix);
+
 //    vec3_t distance = {.x = 0, .y = 0, .z = -0.1f * time_delta};
 //    translate_object(&ship_model, distance);
 //    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
@@ -476,8 +482,12 @@ void display() {
 
     // This code draws the shapes with a texture.
 
-    // Load the shapes texture.
+    // Set the texture sampler for the shader. Because we're using GL_TEXTURE0 we set this to 0.
     glActiveTexture(GL_TEXTURE0);
+    GLint textureLocation = glGetUniformLocation(shaderProgram, "textureSampler");
+    glUniform1i(textureLocation, 0);  // Set the value of the uniform variable to 0 (texture unit 0)
+
+    // Load the shapes texture.
     glBindTexture(GL_TEXTURE_2D, ship_model.texture_id);
 
     // Tell open GL to update the vertex and texture buffers with the new data.
@@ -490,9 +500,25 @@ void display() {
     glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
     glBufferSubData(GL_ARRAY_BUFFER, 0, ship_model.num_vertices * 2 * sizeof(GLfloat), ship_model.texture_uvs);
 
-    // Set the texture sampler for the shader. Because we're using GL_TEXTURE0 we set this to 0.
-    GLint textureLocation = glGetUniformLocation(shaderProgram, "textureSampler");
-    glUniform1i(textureLocation, 0);  // Set the value of the uniform variable to 0 (texture unit 0)
+    // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
+    // need to go back to being relative to the entire vertex array.
+    glDrawElements(GL_TRIANGLES, ship_model.num_indices * 3, GL_UNSIGNED_INT, ship_model.indices);
+
+
+
+    /**
+     * TODO: Don't even bother factoring this duplication out into a function. We shouldn't do a draw call for
+     * each object we should ensure all of their data(texture UVs, vertices, etc) are in contiguous memory and
+     * do a single draw call. This probably means using an allocator in the object creation instead of separate
+     * mallocs.
+     */
+    glBindTexture(GL_TEXTURE_2D, cube_model.texture_id);
+    glBindBuffer(GL_ARRAY_BUFFER, gl_vertex_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, cube_model.num_vertices * 4 * sizeof(GLfloat), cube_model.vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, cube_model.num_vertices * 2 * sizeof(GLfloat), cube_model.texture_uvs);
+    glDrawElements(GL_TRIANGLES, cube_model.num_indices * 3, GL_UNSIGNED_INT, cube_model.indices);
+
 
 //    size_t num_indices = total_time;
 
@@ -504,9 +530,6 @@ void display() {
 //    }
 //    printf("\n");
 
-    // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
-    // need to go back to being relative to the entire vertex array.
-    glDrawElements(GL_TRIANGLES, ship_model.num_indices * 3, GL_UNSIGNED_INT, ship_model.indices);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -734,11 +757,8 @@ int main(int argc, char** argv) {
 
     load_shader_program();
 
-//    init_textures(&model_texture);
-
-
     load_object_from_gltf("/Users/jack/workspace/3d/models/ship_model.gltf", &ship_model);
-    printf("%d\n", ship_model.num_vertices);
+    load_object_from_gltf("/Users/jack/workspace/3d/models/cube.gltf", &cube_model);
 
     // TODO: Should really only need a single allocator.
     vertex_allocator     = new_allocator(sizeof(GLfloat) * 4, 1024);
@@ -752,8 +772,11 @@ int main(int argc, char** argv) {
 //    quad = create_pyramid(0.8f, 0.4f, model_texture);
 //    quad = create_cube(0.8f, model_texture);
 
-//    vec3_t distance = {.x = 0, .y = 0, .z = 0.7f};
-//    translate_object(&ship_model, distance);
+    vec3_t distance = {.x = 0.5f, .y = 0, .z = 0};
+    translate_object(&ship_model, distance);
+
+    distance.x = -0.5;
+    translate_object(&cube_model, distance);
 //
 //    distance.x = 0.5;
 //    distance.y = 0.5;
