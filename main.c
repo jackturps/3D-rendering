@@ -15,6 +15,8 @@
 #include "cJSON/cJSON.h"
 #include "base64/base64.h"
 
+typedef unsigned char byte;
+
 
 // Time since the last frame in seconds.
 double time_delta;
@@ -345,29 +347,32 @@ void translate_object(object_t* shape, vec3_t distance) {
     shape->position = add_vectors(shape->position, distance);
 }
 
-void init_textures(GLuint* out_texture_id) {
+//void init_textures(GLuint* out_texture_id) {
+void init_textures(byte* texture_image_data, size_t texture_image_size, GLuint* out_texture_id) {
     // /Users/jack/Downloads/Free 39 Portraits Pixel Art/2 Portraits with back
 
     // TODO: Use our own memory instead of STBI stuff.
     // TODO: if we load into floats, or pass ints to opengl, we can directly use the loaded buffer to provide the texture.
-    int image_width, image_height, channels;
-    char* image_path = "/Users/jack/Downloads/Free 39 Portraits Pixel Art/2 Portraits with back/Icons_05.png";
-    unsigned char* image_data = stbi_load(image_path, &image_width, &image_height, &channels, STBI_rgb);
+    int image_width, image_height, num_channels;
+    char* image_path = "/Users/jack/workspace/3d/models/cube_texture.png";
+//    char* image_path = "/Users/jack/workspace/3d/models/ship_texture.png";
+//    unsigned char* image_data = stbi_load(image_path, &image_width, &image_height, &num_channels, STBI_rgb_alpha);
+    byte* image_data = stbi_load_from_memory(texture_image_data, texture_image_size, &image_width, &image_height, &num_channels, STBI_rgb_alpha);
     if(image_data == NULL) {
         const char* error = stbi_failure_reason();
         printf("Failed to load image: %s\n", error);
         exit(-1);
     }
 
-    printf("Loaded %dx%d image with %d channels.\n", image_width, image_height, channels);
+    printf("Loaded %dx%d image with %d num_channels.\n", image_width, image_height, num_channels);
     GLfloat* texture_data = (GLfloat*)malloc(image_width * image_height * 4 * sizeof(GLfloat));
     for (int pixel_idx = 0; pixel_idx < image_width * image_height; pixel_idx += 1) {
         int texture_offset = pixel_idx * 4;
-        int image_offset = pixel_idx * 3;
+        int image_offset = pixel_idx * 4;
         texture_data[texture_offset+0] = image_data[image_offset + 0] / 255.0f;
         texture_data[texture_offset+1] = image_data[image_offset + 1] / 255.0f;
         texture_data[texture_offset+2] = image_data[image_offset + 2] / 255.0f;
-        texture_data[texture_offset+3] = 1.0f;
+        texture_data[texture_offset+3] = image_data[image_offset + 3] / 255.0f;
 //        printf(
 //                "%d, %d, %d\n",
 //                image_data[image_offset+0],
@@ -431,7 +436,7 @@ GLuint shaderProgram;
 GLuint vertexShader;
 GLuint fragmentShader;
 
-GLuint technicolor_texture;
+GLuint model_texture;
 
 object_t pyramid;
 object_t cube;
@@ -453,8 +458,8 @@ void display() {
     // TODO: Its probably better to apply all transforms to each vertex as we iterate instead of iterating multiple times.
     float transform_matrix[4][4];
 
-//    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
-//    rotate_object(&cube, transform_matrix);
+    get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
+    rotate_object(&model, transform_matrix);
     get_y_rotation_matrix(transform_matrix, 0.5 * time_delta);
     rotate_object(&model, transform_matrix);
 
@@ -571,9 +576,9 @@ int main(int argc, char** argv) {
     glEnable(GLUT_DOUBLE| GL_DEPTH_TEST);
 
     // Enable backface culling and set the winding order to counter clockwise.
-//    glEnable(GL_CULL_FACE);
-//    glCullFace(GL_BACK);
-//    glFrontFace(GL_CCW);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
 
     const char* version = (const char*)glGetString(GL_VERSION);
     int major, minor;
@@ -582,7 +587,7 @@ int main(int argc, char** argv) {
 
     load_shader_program();
 
-    init_textures(&technicolor_texture);
+//    init_textures(&model_texture);
 
     // Read and parse model file.
     char* model_path = "/Users/jack/workspace/3d/models/ship_model.gltf";
@@ -625,11 +630,32 @@ int main(int argc, char** argv) {
     size_t vertex_data_offset = cJSON_GetNumberValue(vertex_data_offset_json);
     size_t vertex_data_size = cJSON_GetNumberValue(vertex_data_size_json);
 
+    cJSON* uv_buffer_view = cJSON_GetArrayItem(buffer_views, 2);
+    cJSON* uv_data_offset_json = cJSON_GetObjectItem(uv_buffer_view, "byteOffset");
+    cJSON* uv_data_size_json = cJSON_GetObjectItem(uv_buffer_view, "byteLength");
+    size_t uv_data_offset = cJSON_GetNumberValue(uv_data_offset_json);
+
     cJSON* index_buffer_view = cJSON_GetArrayItem(buffer_views, 3);
     cJSON* index_data_offset_json = cJSON_GetObjectItem(index_buffer_view, "byteOffset");
     cJSON* index_data_size_json = cJSON_GetObjectItem(index_buffer_view, "byteLength");
     size_t index_data_offset = cJSON_GetNumberValue(index_data_offset_json);
     size_t index_data_size = cJSON_GetNumberValue(index_data_size_json);
+
+
+    cJSON* model_images = cJSON_GetObjectItem(json, "images");
+    cJSON* model_image  = cJSON_GetArrayItem(model_images, 0);
+    cJSON* texture_uri_json = cJSON_GetObjectItem(model_image, "uri");
+    // Jankily remove the prefix TODO: properly interpret the base64 prefix.
+    byte* texture_uri_base64 = &cJSON_GetStringValue(texture_uri_json)[22];
+
+    size_t texture_data_size;
+    byte* texture_data = base64_decode(texture_uri_base64, strlen(texture_uri_base64), &texture_data_size);
+    if(texture_data == NULL) {
+        printf("Failed to parse model's texture data from base64.\n");
+        exit(-1);
+    }
+    init_textures(texture_data, texture_data_size, &model_texture);
+
 
     // TODO: Check that the JSON structure is as expected as we go.
     cJSON* model_buffers = cJSON_GetObjectItem(json, "buffers");
@@ -662,7 +688,7 @@ int main(int argc, char** argv) {
     printf("System short size: %lu\n", sizeof(unsigned short));
 
 
-    model.texture_id = technicolor_texture;
+    model.texture_id = model_texture;
     model.position.x = 0;
     model.position.y = 0;
     model.position.z = 0;
@@ -673,24 +699,30 @@ int main(int argc, char** argv) {
     model.num_vertices = num_floats / 3;
     printf("%d vertices in model\n", model.num_vertices);
     model.vertices = malloc(model.num_vertices * 4 * sizeof(GLfloat));
-    model.texture_uvs = malloc(model.num_vertices * 2 * sizeof(GLfloat));
     GLfloat* vertex_data = (GLfloat*)(model_data + vertex_data_offset);
     for(int i = 0; i < model.num_vertices; i++) {
-        int output_idx = i * 4;
-        // The gltf format does not include the w property of the vector.
+        // The gltf format does not include the w property of the vector, so inputs
+        // have 3 values per vector and the output has 4 values per vector.
         int input_idx = i * 3;
+        int output_idx = i * 4;
         model.vertices[output_idx + 0] = vertex_data[input_idx + 0];
         model.vertices[output_idx + 1] = vertex_data[input_idx + 1];
         model.vertices[output_idx + 2] = vertex_data[input_idx + 2];
         model.vertices[output_idx + 3] = 1.0f;
-
-        // TODO: Read texture UVs from file.
-        int uv_idx = i * 2;
-        model.texture_uvs[uv_idx]     = 0.5f;//(float)rand() / (float)RAND_MAX;
-        model.texture_uvs[uv_idx + 1] = 0.5f;//(float)rand() / (float)RAND_MAX;
     }
 //    print_float_buffer(model.vertices, model.num_vertices * 4, 4);
 //    printf("\n=======================\n");
+
+    model.texture_uvs = malloc(model.num_vertices * 2 * sizeof(GLfloat));
+    GLfloat* uv_data = (GLfloat*)(model_data + uv_data_offset);
+    for(int i = 0; i < model.num_vertices; i++) {
+        int uv_idx = i * 2;
+        model.texture_uvs[uv_idx + 0] = uv_data[uv_idx + 0];//0.625f;
+        model.texture_uvs[uv_idx + 1] = uv_data[uv_idx + 1];//0.125;
+    }
+    print_float_buffer(model.texture_uvs, model.num_vertices * 2, 2);
+    printf("\n=======================\n");
+
 
     size_t num_shorts = index_data_size / sizeof(unsigned short);
     model.num_indices = num_shorts / 3;
@@ -712,15 +744,15 @@ int main(int argc, char** argv) {
     index_allocator      = new_allocator(sizeof(GLuint) * 3, 1024);
     texture_uv_allocator = new_allocator(sizeof(GLfloat) * 3, 1024);
 
-//    pyramid1 = create_pyramid(0, 0, technicolor_texture);
+//    pyramid1 = create_pyramid(0, 0, model_texture);
 //    pyramid = create_pyramid(0, 0);
 //    cube = create_cube(0.5f);
-//    quad = create_quad(0.8f, 0.4f, technicolor_texture);
-//    quad = create_pyramid(0.8f, 0.4f, technicolor_texture);
-//    quad = create_cube(0.8f, technicolor_texture);
+//    quad = create_quad(0.8f, 0.4f, model_texture);
+//    quad = create_pyramid(0.8f, 0.4f, model_texture);
+//    quad = create_cube(0.8f, model_texture);
 
-    vec3_t distance = {.x = 0, .y = 0, .z = 0.7f};
-    translate_object(&model, distance);
+//    vec3_t distance = {.x = 0, .y = 0, .z = 0.7f};
+//    translate_object(&model, distance);
 //
 //    distance.x = 0.5;
 //    distance.y = 0.5;
