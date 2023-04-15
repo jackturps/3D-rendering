@@ -441,7 +441,7 @@ GLuint model_texture;
 object_t pyramid;
 object_t cube;
 object_t quad;
-object_t model;
+object_t ship_model;
 
 GLuint gl_vertex_array_object;
 GLuint gl_vertex_buffer;
@@ -459,36 +459,36 @@ void display() {
     float transform_matrix[4][4];
 
     get_x_rotation_matrix(transform_matrix, 0.63f * time_delta);
-    rotate_object(&model, transform_matrix);
+    rotate_object(&ship_model, transform_matrix);
     get_y_rotation_matrix(transform_matrix, 0.5 * time_delta);
-    rotate_object(&model, transform_matrix);
+    rotate_object(&ship_model, transform_matrix);
 
 //    vec3_t distance = {.x = 0, .y = 0, .z = -0.1f * time_delta};
-//    translate_object(&model, distance);
+//    translate_object(&ship_model, distance);
 //    get_x_rotation_matrix(transform_matrix, -0.5f * time_delta);
-//    rotate_object(&model, transform_matrix);
+//    rotate_object(&ship_model, transform_matrix);
 //    get_y_rotation_matrix(transform_matrix, -0.8f * time_delta);
 //    rotate_object(&pyramid, transform_matrix);
 
 //    printf("============\n\n");
-//    print_float_buffer(model.vertices, model.num_vertices * 3, 4);
+//    print_float_buffer(ship_model.vertices, ship_model.num_vertices * 3, 4);
 //    exit(-1);
 
     // This code draws the shapes with a texture.
 
     // Load the shapes texture.
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, model.texture_id);
+    glBindTexture(GL_TEXTURE_2D, ship_model.texture_id);
 
     // Tell open GL to update the vertex and texture buffers with the new data.
     // TODO: We only need to update vertices that have moved since last frame.
     glBindBuffer(GL_ARRAY_BUFFER, gl_vertex_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, model.num_vertices * 4 * sizeof(GLfloat), model.vertices);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, ship_model.num_vertices * 4 * sizeof(GLfloat), ship_model.vertices);
 
     // TODO: I think its pretty unlikely for texture UVs to change for an existing shape, this probably doesn't need
     // to happen each frame.
     glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, model.num_vertices * 2 * sizeof(GLfloat), model.texture_uvs);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, ship_model.num_vertices * 2 * sizeof(GLfloat), ship_model.texture_uvs);
 
     // Set the texture sampler for the shader. Because we're using GL_TEXTURE0 we set this to 0.
     GLint textureLocation = glGetUniformLocation(shaderProgram, "textureSampler");
@@ -496,17 +496,17 @@ void display() {
 
 //    size_t num_indices = total_time;
 
-//    for(int i = 0; i < model.num_vertices; i++) {
+//    for(int i = 0; i < ship_model.num_vertices; i++) {
 //        int vertex_idx = i * 4;
-//        if(model.vertices[vertex_idx + 1] > 0.9) {
-//            printf("Vertex %d has a big Y %.2f\n", i, model.vertices[vertex_idx + 1]);
+//        if(ship_model.vertices[vertex_idx + 1] > 0.9) {
+//            printf("Vertex %d has a big Y %.2f\n", i, ship_model.vertices[vertex_idx + 1]);
 //        }
 //    }
 //    printf("\n");
 
     // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
     // need to go back to being relative to the entire vertex array.
-    glDrawElements(GL_TRIANGLES, model.num_indices * 3, GL_UNSIGNED_INT, model.indices);
+    glDrawElements(GL_TRIANGLES, ship_model.num_indices * 3, GL_UNSIGNED_INT, ship_model.indices);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -565,37 +565,17 @@ void load_shader_program() {
     glUseProgram(shaderProgram);
 }
 
-int main(int argc, char** argv) {
-    last_frame_time = get_current_time();
-
-    glutInit(&argc, argv);
-    glutCreateWindow("Jacks 3-Dimensional Wonderland");
-    glutDisplayFunc(display);
-
-    // This enables z-buffering so pixels are occluded based on depth.
-    glEnable(GLUT_DOUBLE| GL_DEPTH_TEST);
-
-    // Enable backface culling and set the winding order to counter clockwise.
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
-
-    const char* version = (const char*)glGetString(GL_VERSION);
-    int major, minor;
-    sscanf(version, "%d.%d", &major, &minor);
-    printf("OpenGL version supported by your graphics card: %s\n", version);
-
-    load_shader_program();
-
-//    init_textures(&model_texture);
+void load_object_from_gltf(char* model_file_path, object_t* object_out) {
+    object_t model;
+    model.position.x = 0;
+    model.position.y = 0;
+    model.position.z = 0;
 
     // Read and parse model file.
-    char* model_path = "/Users/jack/workspace/3d/models/ship_model.gltf";
-//    char* model_path = "/Users/jack/workspace/3d/models/cube.gltf";
-    FILE* file = fopen(model_path, "r");
+    FILE* file = fopen(model_file_path, "r");
     if(!file) {
-       printf("Failed to open model file.");
-       exit(-1);
+        printf("Failed to open model file.");
+        exit(-1);
     }
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
@@ -654,8 +634,7 @@ int main(int argc, char** argv) {
         printf("Failed to parse model's texture data from base64.\n");
         exit(-1);
     }
-    init_textures(texture_data, texture_data_size, &model_texture);
-
+    init_textures(texture_data, texture_data_size, &model.texture_id);
 
     // TODO: Check that the JSON structure is as expected as we go.
     cJSON* model_buffers = cJSON_GetObjectItem(json, "buffers");
@@ -688,13 +667,6 @@ int main(int argc, char** argv) {
     printf("System short size: %lu\n", sizeof(unsigned short));
 
 
-    model.texture_id = model_texture;
-    model.position.x = 0;
-    model.position.y = 0;
-    model.position.z = 0;
-
-//    size_t num_bytes = 1872; // For ship model.
-//    size_t num_bytes = 288; // For cube model.
     size_t num_floats = vertex_data_size / sizeof(GLfloat);
     model.num_vertices = num_floats / 3;
     printf("%d vertices in model\n", model.num_vertices);
@@ -720,8 +692,8 @@ int main(int argc, char** argv) {
         model.texture_uvs[uv_idx + 0] = uv_data[uv_idx + 0];//0.625f;
         model.texture_uvs[uv_idx + 1] = uv_data[uv_idx + 1];//0.125;
     }
-    print_float_buffer(model.texture_uvs, model.num_vertices * 2, 2);
-    printf("\n=======================\n");
+//    print_float_buffer(model.texture_uvs, model.num_vertices * 2, 2);
+//    printf("\n=======================\n");
 
 
     size_t num_shorts = index_data_size / sizeof(unsigned short);
@@ -737,7 +709,36 @@ int main(int argc, char** argv) {
 
     free(model_data);
 
+    *object_out = model;
+}
 
+int main(int argc, char** argv) {
+    last_frame_time = get_current_time();
+
+    glutInit(&argc, argv);
+    glutCreateWindow("Jacks 3-Dimensional Wonderland");
+    glutDisplayFunc(display);
+
+    // This enables z-buffering so pixels are occluded based on depth.
+    glEnable(GLUT_DOUBLE| GL_DEPTH_TEST);
+
+    // Enable backface culling and set the winding order to counter clockwise.
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+
+    const char* version = (const char*)glGetString(GL_VERSION);
+    int major, minor;
+    sscanf(version, "%d.%d", &major, &minor);
+    printf("OpenGL version supported by your graphics card: %s\n", version);
+
+    load_shader_program();
+
+//    init_textures(&model_texture);
+
+
+    load_object_from_gltf("/Users/jack/workspace/3d/models/ship_model.gltf", &ship_model);
+    printf("%d\n", ship_model.num_vertices);
 
     // TODO: Should really only need a single allocator.
     vertex_allocator     = new_allocator(sizeof(GLfloat) * 4, 1024);
@@ -752,12 +753,11 @@ int main(int argc, char** argv) {
 //    quad = create_cube(0.8f, model_texture);
 
 //    vec3_t distance = {.x = 0, .y = 0, .z = 0.7f};
-//    translate_object(&model, distance);
+//    translate_object(&ship_model, distance);
 //
 //    distance.x = 0.5;
 //    distance.y = 0.5;
 //    translate_object(&cube, distance);
-
 
     // Create a vertex array object that we can use for assigning the vertex attribute arrays.
     glGenVertexArraysAPPLE(1, &gl_vertex_array_object);
@@ -767,7 +767,7 @@ int main(int argc, char** argv) {
     // Setup the json_buffer for storing vertex data and assign it to the appropriate input in the shader.
     glGenBuffers(1, &gl_vertex_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, gl_vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER, model.num_vertices * 4 * sizeof(GLfloat), model.vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, ship_model.num_vertices * 4 * sizeof(GLfloat), ship_model.vertices, GL_STATIC_DRAW);
     GLint posAttrib = glGetAttribLocation(shaderProgram, "aPos");
     glEnableVertexAttribArray(posAttrib);
     glVertexAttribPointer(posAttrib, 4, GL_FLOAT, GL_FALSE, 0, 0);
@@ -775,7 +775,7 @@ int main(int argc, char** argv) {
     // Do the same but for the texture UVs.
     glGenBuffers(1, &gl_texture_uv_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, gl_texture_uv_buffer);
-    glBufferData(GL_ARRAY_BUFFER, model.num_vertices * 2 * sizeof(GLfloat), model.texture_uvs, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, ship_model.num_vertices * 2 * sizeof(GLfloat), ship_model.texture_uvs, GL_STATIC_DRAW);
     GLint texAttrib = glGetAttribLocation(shaderProgram, "aTexCoord");
     glEnableVertexAttribArray(texAttrib);
     glVertexAttribPointer(texAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
