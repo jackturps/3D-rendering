@@ -108,10 +108,10 @@ void print_int_buffer(GLuint* buffer, int num_items) {
 }
 
 void get_texture_data(int texture_id) {
-// bind the texture object to the 2D texture target
+    // bind the texture object to the 2D texture target
     glBindTexture(GL_TEXTURE_2D, texture_id);
 
-// retrieve the texture image data
+    // retrieve the texture image data
     GLint level = 0; // mipmap level (0 for base level)
     GLenum format = GL_RGBA; // format of the pixel data
     GLenum type = GL_FLOAT; // data type of the pixel data
@@ -120,19 +120,19 @@ void get_texture_data(int texture_id) {
     GLint imageSize = 0; // size of the image data (will be retrieved)
     void* pixels = NULL; // pointer to the image data (will be retrieved)
 
-// get the width and height of the texture image
+    // get the width and height of the texture image
     glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_WIDTH, &width);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_HEIGHT, &height);
 
-// allocate memory for the image data
+    // allocate memory for the image data
     imageSize = height * width * 4;
     pixels = malloc(imageSize * sizeof(float));
 
-// retrieve the texture image data
+    // retrieve the texture image data
     glGetTexImage(GL_TEXTURE_2D, level, format, type, pixels);
     print_float_buffer(pixels, imageSize, 0);
 
-// free the image data memory
+    // free the image data memory
     free(pixels);
 }
 
@@ -347,16 +347,13 @@ void translate_object(object_t* shape, vec3_t distance) {
     shape->position = add_vectors(shape->position, distance);
 }
 
-//void init_textures(GLuint* out_texture_id) {
 void init_textures(byte* texture_image_data, size_t texture_image_size, GLuint* out_texture_id) {
-    // /Users/jack/Downloads/Free 39 Portraits Pixel Art/2 Portraits with back
-
     // TODO: Use our own memory instead of STBI stuff.
     // TODO: if we load into floats, or pass ints to opengl, we can directly use the loaded buffer to provide the texture.
     int image_width, image_height, num_channels;
     char* image_path = "/Users/jack/workspace/3d/models/cube_texture.png";
-//    char* image_path = "/Users/jack/workspace/3d/models/ship_texture.png";
-//    unsigned char* image_data = stbi_load(image_path, &image_width, &image_height, &num_channels, STBI_rgb_alpha);
+    // char* image_path = "/Users/jack/workspace/3d/models/ship_texture.png";
+    // unsigned char* image_data = stbi_load(image_path, &image_width, &image_height, &num_channels, STBI_rgb_alpha);
     byte* image_data = stbi_load_from_memory(texture_image_data, texture_image_size, &image_width, &image_height, &num_channels, STBI_rgb_alpha);
     if(image_data == NULL) {
         const char* error = stbi_failure_reason();
@@ -503,8 +500,6 @@ void display() {
     // TODO: Because we're just drawing the quad here all of the indices start from 0, I think in the end these will
     // need to go back to being relative to the entire vertex array.
     glDrawElements(GL_TRIANGLES, ship_model.num_indices * 3, GL_UNSIGNED_INT, ship_model.indices);
-
-
 
     /**
      * TODO: Don't even bother factoring this duplication out into a function. We shouldn't do a draw call for
